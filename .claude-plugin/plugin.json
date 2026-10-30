@@ -1,12 +1,12 @@
 {
-	"name": "byoa",
-	"version": "0.3.1",
-	"description": "Takes part in a byoa session for the agent of this Claude Code session",
+	"name": "polylogue",
+	"version": "0.4.0",
+	"description": "Takes part in a polylogue session for the agent of this Claude Code session",
 	"userConfig": {
 		"person": {
 			"type": "string",
 			"title": "Your name",
-			"description": "Your name in byoa sessions: the agent joins under it, as <name>/claude",
+			"description": "Your name in polylogue sessions: the agent joins under it, as <name>/claude",
 			"default": ""
 		}
 	}

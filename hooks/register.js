@@ -1,7 +1,7 @@
-// byoa for Claude Code: the session's agent takes part in a byoa session.
+// polylogue for Claude Code: the session's agent takes part in a polylogue session.
 // What others send arrives as prompts, and what the agent writes goes out as entries.
 
-const RELAY = "https://byoa.agentic.lwirth.com";
+const RELAY = "https://polylogue.agentic.lwirth.com";
 // A receive waits at most this long, within $.http.fetch's 30 seconds.
 const WAIT = 25;
 
@@ -43,8 +43,8 @@ function prompt(s, entries) {
 			const payload =
 				x.text !== undefined
 					? x.text
-					: `${x.size} bytes${x.filename ? `, ${x.filename}` : ""}: sh byoa fetch ${s.link} ${x.n} <file>`;
-			return `[byoa: ${x.from} sent ${x.type}: ${payload}]`;
+					: `${x.size} bytes${x.filename ? `, ${x.filename}` : ""}: sh polylogue fetch ${s.link} ${x.n} <file>`;
+			return `[polylogue: ${x.from} sent ${x.type}: ${payload}]`;
 		})
 		.join("\n\n");
 }
@@ -126,7 +126,7 @@ async function join($, args) {
 	const found = parse(args);
 	if (!found)
 		return {
-			text: "Give /byoa a session link or token.",
+			text: "Give /polylogue a session link or token.",
 		};
 	if (session) await leave($);
 	const name = person ? `${person}/claude` : "claude";
@@ -170,14 +170,14 @@ async function introduce($, s) {
 	const name = s.name;
 	await $.prompt.submit({
 		text:
-			`You take part in the byoa session ${s.link} as "${name}"; this plugin joined it for you and runs it.` +
+			`You take part in the polylogue session ${s.link} as "${name}"; this plugin joined it for you and runs it.` +
 			" What the others send arrives as your prompts, and every reply you write goes to them as you write it." +
 			" Receiving yourself would end the plugin's receive, and with it the plugin's part in the session; sending your replies yourself would send them twice." +
-			" The byoa script does what the plugin doesn't, such as sending or fetching a file:" +
-			` it comes from \`curl -so byoa ${RELAY}/byoa\`, \`sh byoa join ${s.me}\` sets it up once as you, and \`sh byoa help\` lists the rest.` +
-			" It is plain sh over curl, and its source is public at https://github.com/luiswirth/byoa/blob/main/byoa." +
+			" The polylogue script does what the plugin doesn't, such as sending or fetching a file:" +
+			` it comes from \`curl -so polylogue ${RELAY}/polylogue\`, \`sh polylogue join ${s.me}\` sets it up once as you, and \`sh polylogue help\` lists the rest.` +
+			" It is plain sh over curl, and its source is public at https://github.com/luiswirth/polylogue/blob/main/polylogue." +
 			" That link is yours alone: whoever holds it speaks as you." +
-			" The person leaves with /byoa leave.",
+			" The person leaves with /polylogue leave.",
 	});
 }
 
@@ -193,26 +193,26 @@ export function register(on, options) {
 	person = options.person?.trim() ?? "";
 	on("session.start", async ($, e, next) => {
 		await $.command.register({
-			name: "byoa",
-			description: "Take part in a byoa session, or leave it",
+			name: "polylogue",
+			description: "Take part in a polylogue session, or leave it",
 			argumentHint: "<link or token> | leave",
 			immediate: true,
 		});
 		return next(e);
 	});
 
-	on("command.run", { command: "byoa" }, async ($, e) => {
+	on("command.run", { command: "polylogue" }, async ($, e) => {
 		const args = e.args.trim();
 		if (args === "leave") {
-			if (!session) return { text: "Not in a byoa session." };
+			if (!session) return { text: "Not in a polylogue session." };
 			await leave($);
-			return { text: "Left the byoa session." };
+			return { text: "Left the polylogue session." };
 		}
 		if (!args)
 			return {
 				text: session
 					? `In ${session.link} as ${session.name}.`
-					: "Not in a byoa session.",
+					: "Not in a polylogue session.",
 			};
 		return join($, args);
 	});
@@ -250,7 +250,7 @@ export function register(on, options) {
 		);
 		const line = Text({
 			children: [
-				`byoa · ${session.name} with `,
+				`polylogue · ${session.name} with `,
 				...(others.length === 0
 					? ["nobody yet"]
 					: others.flatMap(([name, p], i) => [

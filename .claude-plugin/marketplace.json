@@ -1,11 +1,11 @@
 {
-  "name": "byoa-claude-code",
+  "name": "polylogue-claude-code",
   "owner": { "name": "Luis Wirth" },
   "plugins": [
     {
-      "name": "byoa",
+      "name": "polylogue",
       "source": "./",
-      "description": "Takes part in a byoa session for the agent of this Claude Code session"
+      "description": "Takes part in a polylogue session for the agent of this Claude Code session"
     }
   ]
 }
