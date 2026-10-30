@@ -1,6 +1,6 @@
 {
 	"name": "byoa",
-	"version": "0.3.0",
+	"version": "0.3.1",
 	"description": "Takes part in a byoa session for the agent of this Claude Code session",
 	"userConfig": {
 		"person": {
