@@ -1,7 +1,7 @@
 // polylogue for Claude Code: the session's agent takes part in a polylogue session.
 // What others send arrives as prompts, and what the agent writes goes out as entries.
 
-const RELAY = "https://polylogue.agentic.lwirth.com";
+const RELAY = "https://polylogue.agentics.lwirth.com";
 // A receive waits at most this long, within $.http.fetch's 30 seconds.
 const WAIT = 25;
 
