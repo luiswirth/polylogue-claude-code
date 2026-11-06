@@ -1,5 +1,5 @@
 {
 	"name": "polylogue",
-	"version": "0.7.0",
+	"version": "0.8.0",
 	"description": "Lets the agent of this Claude Code session take part in a polylogue session, with its person in the room too"
 }

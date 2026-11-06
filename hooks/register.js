@@ -205,6 +205,7 @@ async function join($, e) {
 	session = s;
 	held = [];
 	context = [];
+	await remember($, s);
 	$.clock.after(0, () => receive($, s));
 	$.ui.invalidate("ui.render");
 	return [
@@ -231,8 +232,66 @@ async function leave($) {
 	context = [];
 	$.ui.invalidate("ui.render");
 	if (!s) return;
+	await forget($);
 	await $.http.fetch(`${s.me}/leave`, { method: "POST" });
 	if (s.person) await $.http.fetch(`${s.person.me}/leave`, { method: "POST" });
+}
+
+/** The key under which this Claude Code session keeps the polylogue session it is in, since a resume, such as `claude --resume`, starts a new process with no memory of it. */
+async function kept($) {
+	const r = await $.session.id();
+	const id = typeof r === "string" ? r : r?.value;
+	return id ? `in:${id}` : null;
+}
+
+async function remember($, s) {
+	const key = await kept($);
+	if (key)
+		await $.store.set(key, {
+			link: s.link,
+			name: s.name,
+			me: s.me,
+			person: s.person,
+		});
+}
+
+async function forget($) {
+	const key = await kept($);
+	if (key) await $.store.delete(key);
+}
+
+/** Takes part again in the session this Claude Code session was in before it was resumed. */
+async function resume($) {
+	if (session) return;
+	const key = await kept($);
+	const was = key ? await $.store.get(key) : null;
+	if (!was) return;
+	const r = await $.http.fetch(`${was.me}/join`, { method: "POST" });
+	if (!r.ok) {
+		// No longer anyone's link, or no session: nothing to take part in again.
+		if ([403, 404, 410].includes(r.status)) await $.store.delete(key);
+		$.ui.log(
+			`could not take part again in ${was.link}: ${r.status} ${r.text.trim()}`,
+		);
+		return;
+	}
+	if (was.person)
+		await $.http.fetch(`${was.person.me}/join`, { method: "POST" });
+	const s = {
+		link: was.link,
+		name: was.name,
+		me: was.me,
+		read: JSON.parse(r.text).read,
+		person: was.person,
+		presence: {},
+		activity: {},
+	};
+	session = s;
+	held = [];
+	context = [];
+	$.ui.log(`in ${s.link} again, as ${s.name}`);
+	$.clock.after(0, () => receive($, s));
+	$.ui.invalidate("ui.render");
 }
 
 /** The edited file's path within its Git repository, which every clone shares. */
@@ -298,6 +357,7 @@ export function register(on) {
 			argumentHint: "say <to> <text> | leave",
 			immediate: true,
 		});
+		$.clock.after(0, () => resume($));
 		return next(e);
 	});
 
@@ -386,11 +446,6 @@ export function register(on) {
 			session.dropped = false;
 			void submit($, session);
 		}
-		return next(e);
-	});
-
-	on("session.end", async ($, e, next) => {
-		await leave($);
 		return next(e);
 	});
 
