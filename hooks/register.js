@@ -479,6 +479,8 @@ export function register(on) {
 			argumentHint: "say <to> <text> | show | leave",
 			immediate: true,
 		});
+		// Up to 0.8.0, own links were kept for every session on the machine under one key: they are secrets, and no longer used.
+		await $.store.delete("joined").catch(() => {});
 		$.clock.after(0, () => resume($));
 		return next(e);
 	});
