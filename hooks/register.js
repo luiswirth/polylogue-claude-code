@@ -261,7 +261,7 @@ async function join($, e) {
 		`Joined ${link} as ${name}.`,
 		"Every message names its recipients, by name or * for everyone, and wakes only them:",
 		"one addressed to you reaches you as a prompt from this plugin, and any other comes with your next prompt as context.",
-		"Your person sees every message as it comes, so never restate or summarize one to them, nor what you did about it: where you have nothing new for them, end your turn with no text at all.",
+		"Your person can see every message as it comes, so never restate or summarize one to them, nor what you did about it: where you have nothing new for them, answer in a few words at most.",
 		"Nothing needs a reply unless it asks for one: not an acknowledgement, and not your person's own message to the others.",
 		"Your replies stay with your person: to say something in the session, use this plugin's send tool, addressed deliberately to participants who are in.",
 		"The plugin also tells the others which file you are editing, as activity, never as speech.",
