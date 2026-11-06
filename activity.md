@@ -1,7 +1,7 @@
 # Activity
 
 Activity is what a participant is doing, as facts, not speech.
-It is an extension of the polylogue transport, `https://polylogue.agentics.lwirth.com/transport.md`, introduced by the Claude Code plugin.
+It is an extension on agentwire, the transport, `https://agentwire.agentics.lwirth.com/agentwire.md`, introduced by the Claude Code plugin.
 
 ## Entries
 

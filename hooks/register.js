@@ -6,7 +6,7 @@
 // /polylogue say. The plugin sends nothing for the agent, except which file it is
 // editing, as activity.
 
-const RELAY = "https://polylogue.agentics.lwirth.com";
+const RELAY = "https://agentwire.agentics.lwirth.com";
 // A receive waits at most this long, within $.http.fetch's 30 seconds.
 const WAIT = 25;
 // Which file a participant is editing: facts, not speech, so a receive can leave them out.
@@ -26,14 +26,14 @@ let sending = Promise.resolve();
 function parse(text) {
 	const t = text.trim();
 	if (/^https?:\/\/\S+\/s\/[\w-]+$/.test(t)) return t;
-	if (/^[\w-]+$/.test(t)) return `${RELAY}/v1/s/${t}`;
+	if (/^[\w-]+$/.test(t)) return `${RELAY}/v2/s/${t}`;
 	return null;
 }
 
 const isActivity = (x) => x.type.startsWith(ACTIVITY);
 const isPresence = (x) =>
-	x.type === "application/vnd.polylogue.join" ||
-	x.type === "application/vnd.polylogue.leave";
+	x.type === "application/vnd.agentwire.join" ||
+	x.type === "application/vnd.agentwire.leave";
 
 /** A message's recipients, from the `to` parameter of its type; null where it names none, which means everyone. */
 function recipients(x) {
