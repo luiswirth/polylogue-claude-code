@@ -1,8 +1,10 @@
 // polylogue for Claude Code: the agent of this session takes part in a polylogue session.
-// The agent joins, sends and leaves with tools of its own. What the others say shows
-// in the person's terminal, named by sender, and reaches the agent as a prompt from
-// this plugin. The person speaks into the session with /polylogue say.
-// The plugin sends nothing for the agent, except which file it is editing, as activity.
+// The agent joins, sends and leaves with tools of its own. Every message names its
+// recipients, and the person sees each one in their terminal as it comes. One addressed
+// to the agent reaches it as a prompt from this plugin; any other goes with its next
+// prompt as context, starting no turn. The person speaks into the session with
+// /polylogue say. The plugin sends nothing for the agent, except which file it is
+// editing, as activity.
 
 const RELAY = "https://polylogue.agentics.lwirth.com";
 // A receive waits at most this long, within $.http.fetch's 30 seconds.
@@ -13,8 +15,10 @@ const EDITS = ["Edit", "Write", "MultiEdit", "NotebookEdit"];
 
 /** The session taken part in, or null. */
 let session = null;
-/** Entries of others not yet given to the agent: they go with the next text. */
+/** Messages addressed to the agent, not yet given to it: they start a turn. */
 let held = [];
+/** Everything else said, not yet given to the agent: it goes with its next prompt. */
+let context = [];
 /** Sends, in order. */
 let sending = Promise.resolve();
 
@@ -26,26 +30,42 @@ function parse(text) {
 	return null;
 }
 
-const isText = (x) => x.type.startsWith("text/");
 const isActivity = (x) => x.type.startsWith(ACTIVITY);
+const isPresence = (x) =>
+	x.type === "application/vnd.polylogue.join" ||
+	x.type === "application/vnd.polylogue.leave";
 
-/** What others said, each named by its sender, and every other entry as a line of its own. */
-function prompt(entries) {
-	return entries
-		.map((x) => {
-			if (isText(x)) return `${x.from}: ${x.text ?? ""}`;
-			if (x.type === "application/vnd.polylogue.join")
-				return `[${x.from} joined]`;
-			if (x.type === "application/vnd.polylogue.leave")
-				return `[${x.from} left]`;
-			const payload =
-				x.text !== undefined
-					? x.text
-					: `${x.size} bytes${x.filename ? `, ${x.filename}` : ""}, entry ${x.n}`;
-			return `[${x.from} sent ${x.type}: ${payload}]`;
-		})
-		.join("\n\n");
+/** A message's recipients, from the `to` parameter of its type; null where it names none, which means everyone. */
+function recipients(x) {
+	const to = /;\s*to=(?:"([^"]*)"|([^;\s]+))/i.exec(x.type);
+	return to ? (to[1] ?? to[2]).split(/\s+/).filter(Boolean) : null;
 }
+
+/** Whether a message is addressed to `name`. */
+function addressed(x, name) {
+	const to = recipients(x);
+	return to === null || to.includes("*") || to.includes(name);
+}
+
+/** A message as a line: its sender, its recipients, and what it says. */
+function line(x) {
+	const to = recipients(x);
+	const whom = to === null || to.includes("*") ? "everyone" : to.join(", ");
+	const payload =
+		x.text ??
+		`${x.size} bytes${x.filename ? `, ${x.filename}` : ""}, entry ${x.n}`;
+	const said = x.type.startsWith("text/")
+		? payload
+		: `[${x.type.split(";")[0]}: ${payload}]`;
+	return `${x.from} → ${whom}: ${said}`;
+}
+
+/** Closes every prompt from the session, since a prompt invites a report to the person, who already saw it. */
+const REMINDER =
+	"(Your person sees this too. Answer in the session if it asks you something, and tell your person only what is new to them, or nothing.)";
+
+/** The type of a message in markdown to `to`. */
+const speech = (to) => `text/markdown; charset=utf-8; to="${to.join(" ")}"`;
 
 /** Joins `link` as `name`, again with the own link kept from before where there is one. */
 async function enter($, link, name) {
@@ -110,23 +130,36 @@ async function receive($, s) {
 	const entries = lines.filter((x) => x.n > s.read);
 	if (entries.length > 0) {
 		s.read = entries.at(-1).n;
-		for (const x of entries.filter(isActivity)) {
-			try {
-				s.activity[x.from] = JSON.parse(x.text).editing;
-			} catch {}
+		for (const x of entries) {
+			if (isActivity(x)) {
+				try {
+					s.activity[x.from] = JSON.parse(x.text).editing;
+				} catch {}
+			} else if (isPresence(x)) {
+				// Who is in shows in the line above the prompt, and nowhere else.
+			} else if (addressed(x, s.name) && x.from !== s.person?.name) {
+				held.push(x);
+			} else {
+				// The person sees it at once, unless they said it; the agent gets it with its next prompt.
+				if (x.from !== s.person?.name) $.ui.log(line(x));
+				context.push(x);
+			}
 		}
-		held.push(...entries.filter((x) => !isActivity(x)));
-		if (held.some(isText)) await submit($, s);
+		if (held.length > 0) await submit($, s);
 	}
 	$.ui.invalidate("ui.render");
 	$.clock.after(0, () => receive($, s));
 }
 
-/** Gives what others said to the agent, as a prompt from this plugin, once it is idle. */
+/** Gives the messages addressed to the agent to it, as a prompt from this plugin, once it is idle. */
 async function submit($, s) {
-	const text = prompt(held);
+	const said = context.length
+		? `\n\nSaid before, without waking you:\n${context.map(line).join("\n")}`
+		: "";
+	const text = `${held.map(line).join("\n\n")}${said}\n\n${REMINDER}`;
 	const taken = held;
 	held = [];
+	context = [];
 	let result;
 	try {
 		result = await $.prompt.submit({ text });
@@ -140,7 +173,7 @@ async function submit($, s) {
 	}
 }
 
-async function send($, me, body, type = "text/markdown; charset=utf-8") {
+async function send($, me, body, type) {
 	const r = await $.http.fetch(me, {
 		method: "POST",
 		headers: { "Content-Type": type },
@@ -171,12 +204,16 @@ async function join($, e) {
 	};
 	session = s;
 	held = [];
+	context = [];
 	$.clock.after(0, () => receive($, s));
 	$.ui.invalidate("ui.render");
 	return [
 		`Joined ${link} as ${name}.`,
-		"What the others say reaches you as prompts from this plugin, each line named by its sender, and your person sees them too.",
-		"Your replies stay with your person: to say something in the session, use this plugin's send tool.",
+		"Every message names its recipients, by name or * for everyone, and wakes only them:",
+		"one addressed to you reaches you as a prompt from this plugin, and any other comes with your next prompt as context.",
+		"Your person sees every message in their terminal as it comes, so never restate or summarize one to them, nor what you did about it: where you have nothing new for them, end your turn with no text at all.",
+		"Nothing needs a reply unless it asks for one: not an acknowledgement, and not your person's own message to the others.",
+		"Your replies stay with your person: to say something in the session, use this plugin's send tool, addressed deliberately.",
 		"The plugin also tells the others which file you are editing, as activity, never as speech.",
 		s.person
 			? `Your person is in the session as ${owner}, and speaks there themselves with /polylogue say.`
@@ -191,6 +228,7 @@ async function leave($) {
 	const s = session;
 	session = null;
 	held = [];
+	context = [];
 	$.ui.invalidate("ui.render");
 	if (!s) return;
 	await $.http.fetch(`${s.me}/leave`, { method: "POST" });
@@ -232,11 +270,18 @@ export function register(on) {
 		await $.tool.register({
 			name: "send",
 			description:
-				"Say something in the polylogue session you joined, to everyone in it, as markdown.",
+				"Say something in the polylogue session you joined, as markdown, to the participants it is for: it wakes only them, though everyone can read it.",
 			inputSchema: {
 				type: "object",
-				properties: { text: { type: "string" } },
-				required: ["text"],
+				properties: {
+					to: {
+						type: "array",
+						items: { type: "string" },
+						description: 'The recipients\' names, or ["*"] for everyone',
+					},
+					text: { type: "string" },
+				},
+				required: ["to", "text"],
 			},
 			isDeferred: false,
 		});
@@ -248,8 +293,9 @@ export function register(on) {
 		});
 		await $.command.register({
 			name: "polylogue",
-			description: "The polylogue session: say something in it, or leave it",
-			argumentHint: "say <text> | leave",
+			description:
+				"The polylogue session: say something in it, to names separated by commas or * for everyone, or leave it",
+			argumentHint: "say <to> <text> | leave",
 			immediate: true,
 		});
 		return next(e);
@@ -262,7 +308,10 @@ export function register(on) {
 	on("tool.call", { tool: "mcp__polylogue__send" }, async ($, e) => {
 		if (!session)
 			return { result: "Not in a polylogue session: join one first." };
-		const failed = await send($, session.me, e.text ?? "");
+		const to = (e.to ?? []).map((n) => n.trim()).filter(Boolean);
+		if (to.length === 0)
+			return { result: "Not sent: name its recipients, or * for everyone." };
+		const failed = await send($, session.me, e.text ?? "", speech(to));
 		return { result: failed ? `Not sent: ${failed}` : "Sent." };
 	});
 
@@ -295,13 +344,19 @@ export function register(on) {
 			await leave($);
 			return { text: "Left the polylogue session." };
 		}
-		if (args.startsWith("say ")) {
+		if (args === "say" || args.startsWith("say ")) {
 			if (!session) return { text: "Not in a polylogue session." };
 			if (!session.person)
 				return {
 					text: "You are not in the session yourself: tell your agent instead.",
 				};
-			const failed = await send($, session.person.me, args.slice(4));
+			const say = /^say\s+(\S+)\s+([\s\S]+)$/.exec(args);
+			if (!say)
+				return {
+					text: "Say whom it is for: /polylogue say <names, separated by commas, or *> <text>",
+				};
+			const to = say[1].split(",").filter(Boolean);
+			const failed = await send($, session.person.me, say[2], speech(to));
 			return failed ? { text: `Not sent: ${failed}` } : {};
 		}
 		return {
@@ -311,9 +366,23 @@ export function register(on) {
 		};
 	});
 
+	// What was said to others goes with the agent's next prompt, for it to read, starting no turn.
+	on("prompt.submit", async ($, e, next) => {
+		if (context.length === 0) return next(e);
+		const said = context.map(line).join("\n\n");
+		context = [];
+		return next({
+			...e,
+			context: [
+				...(e.context ?? []),
+				`Said in the polylogue session since your last prompt, without waking you:\n\n${said}`,
+			],
+		});
+	});
+
 	// What an interrupted turn dropped goes in again once a turn ends.
 	on("turn.complete", async ($, e, next) => {
-		if (session?.dropped && !e.isAborted && !e.agentId && held.some(isText)) {
+		if (session?.dropped && !e.isAborted && !e.agentId && held.length > 0) {
 			session.dropped = false;
 			void submit($, session);
 		}
