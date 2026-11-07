@@ -209,6 +209,100 @@ async function send($, me, body, type) {
 	return r.ok ? null : `${r.status} ${r.text.trim()}`;
 }
 
+/** The types of the files most often sent, by extension; any other is given with `type`, or goes as bytes. */
+const TYPES = {
+	html: "text/html",
+	htm: "text/html",
+	md: "text/markdown",
+	txt: "text/plain",
+	csv: "text/csv",
+	css: "text/css",
+	js: "text/javascript",
+	json: "application/json",
+	svg: "image/svg+xml",
+	png: "image/png",
+	jpg: "image/jpeg",
+	jpeg: "image/jpeg",
+	gif: "image/gif",
+	webp: "image/webp",
+	pdf: "application/pdf",
+	mp3: "audio/mpeg",
+	wav: "audio/wav",
+	mp4: "video/mp4",
+	zip: "application/zip",
+};
+
+/** Whether a type is text, as agentwire inlines it: any text/*, JSON, or a type ending in +json. */
+const textual = (mime) =>
+	mime.startsWith("text/") ||
+	mime === "application/json" ||
+	mime.endsWith("+json");
+
+/** A string in curl's config syntax. */
+const quoted = (s) => `"${s.replace(/[\\"]/g, "\\$&")}"`;
+
+/**
+ * Sends the file at `path` as one entry of type `mime`, named by its file name,
+ * and resolves the entry as a received one reads, or `{ error }`. Text goes
+ * through $.http.fetch, which carries only text; bytes through curl, given its
+ * options on standard input so that the own link stays out of the process list.
+ */
+async function sendFile($, me, path, mime, to) {
+	const filename = path.split("/").pop();
+	const url = `${me}?filename=${encodeURIComponent(filename)}`;
+	const type = `${mime}${textual(mime) ? "; charset=utf-8" : ""}; to="${to.join(" ")}"`;
+	let size;
+	try {
+		size = (await $.fs.stat(path, { resolve: true })).size;
+	} catch (error) {
+		return { error: `could not read ${path}: ${error}` };
+	}
+	let answer;
+	if (textual(mime)) {
+		let body;
+		try {
+			body = await $.fs.read(path);
+		} catch (error) {
+			return { error: `could not read ${path}: ${error}` };
+		}
+		const r = await $.http.fetch(url, {
+			method: "POST",
+			headers: { "Content-Type": type },
+			body,
+		});
+		if (!r.ok) return { error: `${r.status} ${r.text.trim()}` };
+		answer = r.text;
+	} else {
+		let r;
+		try {
+			r = await $.process.run(["curl", "-sS", "-K", "-"], {
+				stdin: [
+					`url = ${quoted(url)}`,
+					`header = ${quoted(`Content-Type: ${type}`)}`,
+					`data-binary = ${quoted(`@${path}`)}`,
+					`write-out = "\\n%{http_code}"`,
+					"",
+				].join("\n"),
+				timeoutMs: 120_000,
+			});
+		} catch (error) {
+			return {
+				error: `a file that isn't text goes through curl, which could not run here: ${error}`,
+			};
+		}
+		const out = r.stdout.trimEnd().split("\n");
+		const status = out.pop();
+		answer = out.join("\n");
+		if (r.exitCode !== 0 || !/^2/.test(status ?? ""))
+			return { error: `${status} ${answer.trim()} ${r.stderr.trim()}`.trim() };
+	}
+	let n = "?";
+	try {
+		n = JSON.parse(answer).n;
+	} catch {}
+	return { n, type, filename, size };
+}
+
 async function join($, e) {
 	const link = parse(e.session ?? "");
 	if (!link) return "Give the session as its token or its full link.";
@@ -450,7 +544,7 @@ export function register(on) {
 		await $.tool.register({
 			name: "send",
 			description:
-				"Say something in the polylogue session you joined, as markdown, to the participants it is for: it wakes only them, though everyone can read it.",
+				"Say something in the polylogue session you joined, as markdown, or send a file, to the participants it is for: it wakes only them, though everyone can read it.",
 			inputSchema: {
 				type: "object",
 				properties: {
@@ -459,9 +553,22 @@ export function register(on) {
 						items: { type: "string" },
 						description: 'The recipients\' names, or ["*"] for everyone',
 					},
-					text: { type: "string" },
+					text: {
+						type: "string",
+						description: "What you say, as markdown; leave it out to send only a file",
+					},
+					file: {
+						type: "string",
+						description:
+							"A file to send, by its path: it goes as its own message, with its content type and file name",
+					},
+					type: {
+						type: "string",
+						description:
+							"The file's MIME type, such as text/html, where its extension doesn't say it",
+					},
 				},
-				required: ["to", "text"],
+				required: ["to"],
 			},
 			isDeferred: false,
 		});
@@ -496,12 +603,33 @@ export function register(on) {
 		const to = (e.to ?? []).map((n) => n.trim()).filter(Boolean);
 		const refused = refusal(s, to);
 		if (refused) return { result: `Not sent: ${refused}.` };
-		const type = speech(to);
-		const failed = await send($, s.agent.me, e.text ?? "", type);
-		if (failed) return { result: `Not sent: ${failed}` };
-		show(s, { from: s.agent.name, type, text: e.text ?? "" });
+		const text = e.text ?? "";
+		const path = (e.file ?? "").trim();
+		if (!text && !path) return { result: "Not sent: give text, a file, or both." };
+		const mime = (
+			e.type?.trim() ||
+			TYPES[/\.([^./]+)$/.exec(path)?.[1]?.toLowerCase()] ||
+			"application/octet-stream"
+		).split(";")[0];
+		// The text goes first, so that it reads as what the file comes with.
+		if (text) {
+			const type = speech(to);
+			const failed = await send($, s.agent.me, text, type);
+			if (failed) return { result: `Not sent: ${failed}` };
+			show(s, { from: s.agent.name, type, text });
+		}
+		if (path) {
+			const sent = await sendFile($, s.agent.me, path, mime, to);
+			if (sent.error)
+				return {
+					result: `${text ? "The text was sent, the file not" : "Not sent"}: ${sent.error}`,
+				};
+			show(s, { from: s.agent.name, ...sent });
+		}
 		$.ui.invalidate("ui.render");
-		return { result: "Sent." };
+		return {
+			result: path ? `Sent, the file as ${mime}.` : "Sent.",
+		};
 	});
 
 	on("tool.call", { tool: "mcp__polylogue__leave" }, async ($) => {
