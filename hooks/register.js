@@ -24,6 +24,8 @@ let session = null;
 let held = [];
 /** Everything else said, not yet given to the agent: it goes with its next prompt. */
 let context = [];
+/** Whether a prompt of the plugin's is on its way to the agent. */
+let delivering = false;
 /** Sends, in order. */
 let sending = Promise.resolve();
 /** The pane that shows the session, where the band above the prompt doesn't. */
@@ -172,10 +174,23 @@ async function receive($, s) {
 				}
 			}
 		}
-		if (held.length > 0) await submit($, s);
+		if (held.length > 0) void deliver($, s);
 	}
 	$.ui.invalidate("ui.render");
 	$.clock.after(0, () => receive($, s));
+}
+
+/** Gives what is held to the agent, one prompt at a time, apart from the
+ * receive: a prompt waits until the agent is idle, and a receive that waited
+ * with it would show the agent as not receiving all that while. */
+async function deliver($, s) {
+	if (delivering) return;
+	delivering = true;
+	try {
+		while (session === s && held.length > 0 && !s.dropped) await submit($, s);
+	} finally {
+		delivering = false;
+	}
 }
 
 /** Gives the messages addressed to the agent to it, as a prompt from this plugin, once it is idle. */
@@ -728,7 +743,7 @@ export function register(on) {
 	on("turn.complete", async ($, e, next) => {
 		if (session?.dropped && !e.isAborted && !e.agentId && held.length > 0) {
 			session.dropped = false;
-			void submit($, session);
+			void deliver($, session);
 		}
 		return next(e);
 	});
